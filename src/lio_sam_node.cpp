@@ -10,7 +10,27 @@ LioSamNode::LioSamNode(const rclcpp::NodeOptions & options)
 
 LioSamNode::~LioSamNode()
 {
+  // Worker threads exit once rclcpp::ok() turns false; join them before
+  // freeing the structs they run on (destroying first segfaults on Ctrl+C
+  // while active, which also used to interrupt the shutdown map save).
+  join_threads();
   destroy_structs();
+}
+
+void LioSamNode::join_threads()
+{
+  if (globalLocalizeThread_ && globalLocalizeThread_->joinable()) {
+    globalLocalizeThread_->join();
+    globalLocalizeThread_.reset();
+  }
+  if (loopClosureThread_ && loopClosureThread_->joinable()) {
+    loopClosureThread_->join();
+    loopClosureThread_.reset();
+  }
+  if (visualizeMapThread_ && visualizeMapThread_->joinable()) {
+    visualizeMapThread_->join();
+    visualizeMapThread_.reset();
+  }
 }
 
 rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
@@ -48,18 +68,7 @@ LioSamNode::on_deactivate(const rclcpp_lifecycle::State & /*state*/)
 {
   RCLCPP_INFO(get_logger(), "LIO-SAM Deactivating...");
 
-  if (globalLocalizeThread_ && globalLocalizeThread_->joinable()) {
-    globalLocalizeThread_->join();
-    globalLocalizeThread_.reset();
-  }
-  if (loopClosureThread_ && loopClosureThread_->joinable()) {
-    loopClosureThread_->join();
-    loopClosureThread_.reset();
-  }
-  if (visualizeMapThread_ && visualizeMapThread_->joinable()) {
-    visualizeMapThread_->join();
-    visualizeMapThread_.reset();
-  }
+  join_threads();
 
   RCLCPP_INFO(get_logger(), "LIO-SAM Deactivated.");
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
@@ -69,6 +78,7 @@ rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
 LioSamNode::on_cleanup(const rclcpp_lifecycle::State & /*state*/)
 {
   RCLCPP_INFO(get_logger(), "LIO-SAM Cleaning up...");
+  join_threads();
   destroy_structs();
   RCLCPP_INFO(get_logger(), "LIO-SAM Cleaned up.");
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
@@ -78,6 +88,7 @@ rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn
 LioSamNode::on_shutdown(const rclcpp_lifecycle::State & /*state*/)
 {
   RCLCPP_INFO(get_logger(), "LIO-SAM Shutting down...");
+  join_threads();
   destroy_structs();
   RCLCPP_INFO(get_logger(), "LIO-SAM Shut down.");
   return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;

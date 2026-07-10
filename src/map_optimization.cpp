@@ -61,8 +61,19 @@ MapOptimization::MapOptimization(rclcpp_lifecycle::LifecycleNode *node_,
     else
       saveMapDirectory = std::getenv("HOME") + req->destination;
     cout << "Save destination: " << saveMapDirectory << endl;
-    // create directory and remove old files;
-    (void)system((std::string("exec rm -r ") + saveMapDirectory).c_str());
+    if (cloudKeyPoses3D->empty()) {
+      cout << "save_map: no keyframes, aborting save (existing map kept)."
+           << endl;
+      res->success = false;
+      return;
+    }
+    // Write into a temp directory first and swap at the end, so an
+    // interrupted save cannot destroy the previous map.
+    if (!saveMapDirectory.empty() && saveMapDirectory.back() == '/')
+      saveMapDirectory.pop_back();
+    const string finalMapDirectory = saveMapDirectory;
+    saveMapDirectory += ".saving";
+    (void)system((std::string("exec rm -rf ") + saveMapDirectory).c_str());
     (void)system((std::string("mkdir -p ") + saveMapDirectory).c_str());
     // save key frame transformations
     pcl::io::savePCDFileBinary(saveMapDirectory + "/trajectory.pcd",
@@ -117,6 +128,11 @@ MapOptimization::MapOptimization(rclcpp_lifecycle::LifecycleNode *node_,
     *globalMapCloud += *globalSurfCloud;
     int ret = pcl::io::savePCDFileBinary(saveMapDirectory + "/GlobalMap.pcd",
                                          *globalMapCloud);
+    if (ret == 0) {
+      (void)system((std::string("exec rm -rf ") + finalMapDirectory).c_str());
+      (void)system((std::string("mv ") + saveMapDirectory + " " +
+                    finalMapDirectory).c_str());
+    }
     res->success = ret == 0;
     downSizeFilterCorner.setLeafSize(params_->mapping_corner_leaf_size,
                                      params_->mapping_corner_leaf_size,
@@ -427,15 +443,25 @@ void MapOptimization::visualizeGlobalMapThread() {
   }
   if (params_->save_pcd == false)
     return;
+  if (cloudKeyPoses3D->empty()) {
+    cout << "No keyframes to save, keeping existing map files." << endl;
+    return;
+  }
   cout << "****************************************************" << endl;
   cout << "Saving map to pcd files ..." << endl;
   params_->pointcloud_map_directory_path =
       std::getenv("HOME") + params_->pointcloud_map_directory_path;
+  // Write into a temp directory first and swap at the end, so an interrupted
+  // save cannot destroy the previous map.
+  std::string finalMapDirectory = params_->pointcloud_map_directory_path;
+  if (!finalMapDirectory.empty() && finalMapDirectory.back() == '/')
+    finalMapDirectory.pop_back();
+  params_->pointcloud_map_directory_path = finalMapDirectory + ".saving/";
   (void)system(
-      (std::string("exec rm -r ") + params_->pointcloud_map_directory_path)
+      (std::string("exec rm -rf ") + params_->pointcloud_map_directory_path)
           .c_str());
   (void)system(
-      (std::string("mkdir ") + params_->pointcloud_map_directory_path).c_str());
+      (std::string("mkdir -p ") + params_->pointcloud_map_directory_path).c_str());
   pcl::io::savePCDFileASCII(params_->pointcloud_map_directory_path +
                                 "trajectory.pcd",
                             *cloudKeyPoses3D);
@@ -475,6 +501,14 @@ void MapOptimization::visualizeGlobalMapThread() {
   pcl::io::savePCDFileASCII(params_->pointcloud_map_directory_path +
                                 "cloudGlobal.pcd",
                             *globalMapCloud);
+  {
+    std::string tmpDirectory = params_->pointcloud_map_directory_path;
+    if (!tmpDirectory.empty() && tmpDirectory.back() == '/')
+      tmpDirectory.pop_back();
+    (void)system((std::string("exec rm -rf ") + finalMapDirectory).c_str());
+    (void)system(
+        (std::string("mv ") + tmpDirectory + " " + finalMapDirectory).c_str());
+  }
   cout << "****************************************************" << endl;
   cout << "Saving map to pcd files completed" << endl;
 }
@@ -1885,6 +1919,9 @@ void MapOptimization::publishFrames() {
 // =============================================================================
 
 void MapOptimization::cloudGlobalLoad() {
+  if (!params_->load_map_file_dir.empty() &&
+      params_->load_map_file_dir.back() != '/')
+    params_->load_map_file_dir += "/";
   pcl::io::loadPCDFile<pcl::PointXYZI>(
       params_->load_map_file_dir + "GlobalMap.pcd", *cloudGlobalMap);
   pcl::PointCloud<pcl::PointXYZI>::Ptr cloud_temp(

@@ -25,6 +25,7 @@ public:
   rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn on_shutdown(const rclcpp_lifecycle::State & /*state*/);
 
 private:
+  void join_threads();
   void destroy_structs();
   void init_structs();
   void init_parameters();
