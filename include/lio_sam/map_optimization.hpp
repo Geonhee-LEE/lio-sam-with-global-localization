@@ -9,6 +9,7 @@
 #include "lio_sam/utility.hpp"
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
+#include <tf2_ros/static_transform_broadcaster.h>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/geometry/Rot3.h>
 #include <gtsam/inference/Symbol.h>
@@ -175,6 +176,12 @@ private:
   Eigen::Affine3f incrementalOdometryAffineBack;
 
   std::unique_ptr<tf2_ros::TransformBroadcaster> br;
+  // map->odom correction TF for downstream consumers (e.g. Nav2), updated by
+  // global localization. Static (latched) because it changes at the slow
+  // global-ICP rate and must stay valid between updates.
+  std::shared_ptr<tf2_ros::StaticTransformBroadcaster> mapToOdomBroadcaster;
+  void publishMapToOdomTf(float x, float y, float z, float roll, float pitch,
+                          float yaw, const rclcpp::Time &stamp);
 
   rclcpp_lifecycle::LifecycleNode *node_;
   std::shared_ptr<LioSamParams> params_;

@@ -197,6 +197,12 @@ MapOptimization::MapOptimization(rclcpp_lifecycle::LifecycleNode *node_,
     pubGlobalMap = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
         "lio_sam/localization/global_map", 1);
 
+    mapToOdomBroadcaster =
+        std::make_shared<tf2_ros::StaticTransformBroadcaster>(node_);
+    // Nav2 needs a complete map->odom->base_link chain before the first
+    // relocalization succeeds; start from identity, updated on every match.
+    publishMapToOdomTf(0, 0, 0, 0, 0, 0, node_->get_clock()->now());
+
     cloudGlobalMap.reset(new pcl::PointCloud<pcl::PointXYZI>());
     cloudGlobalMapDS.reset(new pcl::PointCloud<pcl::PointXYZI>());
     cloudScanForInitialize.reset(new pcl::PointCloud<pcl::PointXYZI>());
@@ -1918,6 +1924,25 @@ void MapOptimization::publishFrames() {
 // Global Localization Methods
 // =============================================================================
 
+void MapOptimization::publishMapToOdomTf(float x, float y, float z, float roll,
+                                         float pitch, float yaw,
+                                         const rclcpp::Time &stamp) {
+  geometry_msgs::msg::TransformStamped ts;
+  ts.header.stamp = stamp;
+  ts.header.frame_id = params_->map_frame;
+  ts.child_frame_id = params_->odometry_frame;
+  ts.transform.translation.x = x;
+  ts.transform.translation.y = y;
+  ts.transform.translation.z = z;
+  tf2::Quaternion q;
+  q.setRPY(roll, pitch, yaw);
+  ts.transform.rotation.x = q.x();
+  ts.transform.rotation.y = q.y();
+  ts.transform.rotation.z = q.z();
+  ts.transform.rotation.w = q.w();
+  mapToOdomBroadcaster->sendTransform(ts);
+}
+
 void MapOptimization::cloudGlobalLoad() {
   if (!params_->load_map_file_dir.empty() &&
       params_->load_map_file_dir.back() != '/')
@@ -2058,6 +2083,8 @@ void MapOptimization::ICPLocalizeInitialize() {
     pose_odomTo_map.pose.orientation.z = q_odomTo_map.z();
     pose_odomTo_map.pose.orientation.w = q_odomTo_map.w();
     pubOdomToMapPose->publish(pose_odomTo_map);
+    publishMapToOdomTf(deltax, deltay, deltaz, deltaR, deltaP, deltaY,
+                       timeLaserInfoStamp);
   }
 }
 
@@ -2168,6 +2195,7 @@ void MapOptimization::ICPscanMatchGlobal() {
     pose_odomTo_map.pose.orientation.z = q_odomTo_map.z();
     pose_odomTo_map.pose.orientation.w = q_odomTo_map.w();
     pubOdomToMapPose->publish(pose_odomTo_map);
+    publishMapToOdomTf(x, y, z, roll, pitch, yaw, timeLaserInfoStamp);
   }
 }
 
